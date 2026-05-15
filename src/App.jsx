@@ -2,11 +2,12 @@ import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, ScatterChart, Scatter, ZAxis, CartesianGrid } from "recharts";
 
 // ── CURRENCIES ────────────────────────────────────────────────────────────────
+// All watch data stored internally in EUR. CZK is display default.
 const CURRENCIES = {
-  EUR: { symbol:"€", rate:1,     locale:"de-DE" },
-  CZK: { symbol:"Kč",rate:25.2,  locale:"cs-CZ" },
-  USD: { symbol:"$", rate:1.08,  locale:"en-US" },
-  GBP: { symbol:"£", rate:0.86,  locale:"en-GB" },
+  CZK: { symbol:"Kč", rate:25.2,  locale:"cs-CZ" },
+  EUR: { symbol:"€",  rate:1,     locale:"de-DE" },
+  USD: { symbol:"$",  rate:1.08,  locale:"en-US" },
+  GBP: { symbol:"£",  rate:0.86,  locale:"en-GB" },
 };
 
 // ── CONSTANTS ─────────────────────────────────────────────────────────────────
@@ -42,7 +43,7 @@ const bc = b => BCOLORS[b] || "#6366f1";
 const CONDITIONS = ["Poor","Fair","Good","Very Good","Excellent","NOS"];
 const STATUSES   = ["listed","sold","holding","in service"];
 const MONTHS     = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-const NAV        = ["Overview","Inventory","Logistics","P&L","Suppliers","Sales","Intelligence","Wishlist","Pipeline","Calculator"];
+const NAV        = ["Overview","Inventory","P&L","Suppliers","Sales","Intelligence","Calculator"];
 
 const pct     = n => (n * 100).toFixed(1) + "%";
 const profRaw = w => w.askingPrice - w.cost;
@@ -91,25 +92,7 @@ const SUPPLIERS0 = [
   {id:3,name:"Kenji Watanabe",type:"Private Collector",country:"Japan",city:"Tokyo",email:"kenji@example.jp",phone:"+81 3 1234 5678",reliability:5,avgDiscount:15,notes:"JDM pieces. Very honest condition reports.",tags:["JDM","seiko","citizen"]},
 ];
 
-const WISHLIST0 = [
-  {id:1,brand:"Seiko",model:"Seiko 5 Sports",ref:"6119-8400",year:"1970s",targetBuy:400,marketEst:650,priority:"high",notes:"Rally dial preferred",found:false},
-  {id:2,brand:"Grand Seiko",model:"Snowflake",ref:"SBGA211",year:"2010s",targetBuy:3200,marketEst:4000,priority:"medium",notes:"White dial only",found:false},
-  {id:3,brand:"Omega",model:"Constellation Pie-Pan",ref:"2852",year:"1960s",targetBuy:1800,marketEst:2400,priority:"high",notes:"Original bracelet a bonus",found:true},
-];
 
-const PIPELINE0 = [
-  {id:1,brand:"Heuer",model:"Autavia",ref:"2446",year:"1965",askingPrice:8500,offerMade:7200,status:"negotiating",supplierId:2,notes:"Seller wants 8k, pushing back",lastContact:"2024-05-10"},
-  {id:2,brand:"Seiko",model:"Laurel",ref:"J14050",year:"1960",askingPrice:1200,offerMade:900,status:"interested",supplierId:3,notes:"Need photos of caseback",lastContact:"2024-05-08"},
-  {id:3,brand:"Rolex",model:"Explorer",ref:"1016",year:"1969",askingPrice:12000,offerMade:0,status:"tracking",supplierId:1,notes:"Too expensive now, monitor",lastContact:"2024-04-30"},
-];
-
-const LOGISTICS0 = [
-  {id:1,watchId:2,brand:"Rolex",model:"Datejust 36",carrier:"DHL Express",trackingNo:"1234567890",from:"Milan, Italy",to:"Prague, CZ",status:"delivered",sent:"2024-02-05",eta:"2024-02-08",arrived:"2024-02-08",cost:28,insured:true,insuredValue:4600,notes:"Signature required"},
-  {id:2,watchId:6,brand:"Tudor",model:"Submariner",carrier:"FedEx",trackingNo:"9876543210",from:"Prague, CZ",to:"Amsterdam, NL",status:"delivered",sent:"2024-03-28",eta:"2024-03-31",arrived:"2024-04-01",cost:34,insured:true,insuredValue:3800,notes:"Sold to buyer in NL"},
-  {id:3,watchId:8,brand:"Rolex",model:"GMT-Master",carrier:"UPS",trackingNo:"5544332211",from:"Munich, Germany",to:"Prague, CZ",status:"delivered",sent:"2024-03-24",eta:"2024-03-26",arrived:"2024-03-25",cost:42,insured:true,insuredValue:9800,notes:"Express, fragile label"},
-  {id:4,watchId:12,brand:"Seiko",model:"62MAS",carrier:"Japan Post EMS",trackingNo:"EM123456789JP",from:"Tokyo, Japan",to:"Prague, CZ",status:"in transit",sent:"2024-04-08",eta:"2024-04-18",arrived:"",cost:55,insured:true,insuredValue:2600,notes:"EMS tracking updates slowly"},
-  {id:5,watchId:7,brand:"Omega",model:"Seamaster 300",carrier:"PPL",trackingNo:"PPL88776655",from:"Prague, CZ",to:"Brno, CZ",status:"in transit",sent:"2024-04-12",eta:"2024-04-13",arrived:"",cost:8,insured:false,insuredValue:0,notes:"To watchmaker for service"},
-];
 
 // ── PASSWORD AUTH ─────────────────────────────────────────────────────────────
 const ADMIN_PASS  = "Bichviet9339";
@@ -458,14 +441,76 @@ function TimelineModal({ watch, onClose, onSave }) {
   );
 }
 
+// ── PRICE FIELD — per-field currency selector ─────────────────────────────────
+const RATES = { EUR:1, CZK:25.2, USD:1.08, VND:27850 };
+const SYMS  = { EUR:"€", CZK:"Kč", USD:"$", VND:"₫" };
+const CURRENCIES_FIELD = ["CZK","VND","EUR","USD"];
+
+function PriceField({ label, eurKey, dispKey, f, setF, required }) {
+  const cur  = f[eurKey+"Cur"] || "CZK";
+  const rate = RATES[cur];
+  const sym  = SYMS[cur];
+
+  // Convert stored EUR → display currency for showing in input
+  const displayVal = () => {
+    if (f[dispKey] != null) return f[dispKey];           // user typed this
+    if (!f[eurKey]) return "";                            // nothing stored
+    if (cur === "EUR") return f[eurKey];
+    return Math.round(Number(f[eurKey]) * rate).toString();
+  };
+
+  const handleChange = raw => {
+    const eurVal = raw && Number(raw) > 0
+      ? (cur === "EUR" ? Number(raw) : +(Number(raw) / rate).toFixed(2))
+      : "";
+    setF(p => ({ ...p, [dispKey]: raw, [eurKey]: eurVal }));
+  };
+
+  const handleCurChange = newCur => {
+    // Recalculate display from stored EUR when switching currency
+    const newRate = RATES[newCur];
+    const newDisp = f[eurKey] && Number(f[eurKey]) > 0
+      ? (newCur === "EUR" ? f[eurKey] : Math.round(Number(f[eurKey]) * newRate).toString())
+      : "";
+    setF(p => ({ ...p, [eurKey+"Cur"]: newCur, [dispKey]: newDisp }));
+  };
+
+  const eurPreview = cur !== "EUR" && f[eurKey] && Number(f[eurKey]) > 0;
+  const dv = displayVal();
+
+  return (
+    <div>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:5 }}>
+        <label style={BASE_LBL}>{label}{required&&<span style={{color:"#c9a84c",marginLeft:2}}>*</span>}</label>
+        <div style={{ display:"flex", gap:4 }}>
+          {CURRENCIES_FIELD.map(c => (
+            <button key={c} type="button" onClick={() => handleCurChange(c)}
+              style={{ background: cur===c ? "#c9a84c":"#1a1a1a", border:"1px solid", borderColor:cur===c?"#c9a84c":"#2e2e2e", borderRadius:5, padding:"2px 8px", color:cur===c?"#0d0d0d":"#666", fontSize:10, fontWeight:cur===c?700:400, cursor:"pointer", fontFamily:"'IBM Plex Mono',monospace", transition:"all 0.12s" }}>
+              {SYMS[c]}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={{ position:"relative" }}>
+        <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", fontFamily:"'IBM Plex Mono',monospace", fontSize:13, color:"#777", pointerEvents:"none" }}>{sym}</span>
+        <input value={dv} onChange={e => handleChange(e.target.value)}
+          type="number" placeholder="0"
+          style={{ ...BASE_INP, paddingLeft:cur==="VND"?32:28, fontFamily:"'IBM Plex Mono',monospace", fontSize:15 }}/>
+        {eurPreview && (
+          <span style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", fontFamily:"'IBM Plex Mono',monospace", fontSize:10, color:"#555" }}>
+            = €{Number(f[eurKey]).toLocaleString("de-DE",{maximumFractionDigits:0})}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── WATCH MODAL ───────────────────────────────────────────────────────────────
 function WatchModal({ data, suppliers, onClose, onSave }) {
-  const [f, setF] = useState(data||{brand:"",model:"",ref:"",year:"",condition:"Good",cost:"",askingPrice:"",status:"listed",bought:"",soldDate:"",supplierId:"",serviceCost:"",marketValue:"",notes:"",tags:"",photos:[],timeline:[]});
+  const [f, setF] = useState(data||{brand:"",model:"",ref:"",year:"",condition:"Good",cost:"",askingPrice:"",status:"listed",bought:"",soldDate:"",supplierId:"",serviceCost:"",shippingCost:"",marketValue:"",notes:"",tags:"",photos:[],timeline:[]});
   const u = (k,v) => setF(p=>({...p,[k]:v}));
   const fileRef = useRef();
-  const pv = f.cost&&f.askingPrice ? Number(f.askingPrice)-Number(f.cost)-Number(f.serviceCost||0) : null;
-  const mv = pv!==null&&Number(f.cost)>0 ? pv/Number(f.cost) : null;
-
   const handlePhoto = e => {
     const files = Array.from(e.target.files);
     files.forEach(file => {
@@ -489,18 +534,33 @@ function WatchModal({ data, suppliers, onClose, onSave }) {
           ))}
           <div><label style={BASE_LBL}>Condition</label><select value={f.condition} onChange={e=>u("condition",e.target.value)} style={BASE_INP}>{CONDITIONS.map(c=><option key={c}>{c}</option>)}</select></div>
         </div>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:11, marginTop:11 }}>
-          <div><label style={BASE_LBL}>Cost (€)</label><input value={f.cost||""} onChange={e=>u("cost",e.target.value)} type="number" style={BASE_INP}/></div>
-          <div><label style={BASE_LBL}>Asking Price (€)</label><input value={f.askingPrice||""} onChange={e=>u("askingPrice",e.target.value)} type="number" style={BASE_INP}/></div>
-          <div><label style={BASE_LBL}>Service Cost (€)</label><input value={f.serviceCost||""} onChange={e=>u("serviceCost",e.target.value)} type="number" style={BASE_INP} placeholder="0"/></div>
-        </div>
-        <div style={{ marginTop:11 }}><label style={BASE_LBL}>Market Value (€)</label><input value={f.marketValue||""} onChange={e=>u("marketValue",e.target.value)} type="number" style={BASE_INP} placeholder="Your estimate"/></div>
-        {pv!==null && (
-          <div style={{ background:"#121212", border:"1px solid #2e2e2e", borderRadius:8, padding:"10px 14px", marginTop:10, display:"flex", gap:20 }}>
-            <span style={{ fontSize:12, color:"#777" }}>Net profit: <strong style={{ ...NUM, color:pv>=0?"#5de08a":"#e85d04" }}>€{Number(pv).toLocaleString("de-DE")}</strong></span>
-            <span style={{ fontSize:12, color:"#777" }}>Margin: <strong style={{ ...NUM, color:"#c9a84c" }}>{mv!==null?pct(mv):"—"}</strong></span>
+        {/* ── PRICE FIELDS — each with its own currency ── */}
+        <div style={{ marginTop:14, background:"#121212", border:"1px solid #2e2e2e", borderRadius:12, padding:14 }}>
+          <div style={{ fontSize:10, color:"#555", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:12 }}>
+            Pricing — pick a currency per field
           </div>
-        )}
+          <PriceField label="Buy Cost" eurKey="cost" dispKey="costDisplay" f={f} setF={setF} required/>
+          <div style={{ height:10 }}/>
+          <PriceField label="Asking / Sell Price" eurKey="askingPrice" dispKey="askDisplay" f={f} setF={setF} required/>
+          <div style={{ height:10 }}/>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+            <PriceField label="Shipping" eurKey="shippingCost" dispKey="shipDisplay" f={f} setF={setF}/>
+            <PriceField label="Service" eurKey="serviceCost" dispKey="svcDisplay" f={f} setF={setF}/>
+          </div>
+          {/* Live summary */}
+          {(f.cost||f.askingPrice) && (() => {
+            const np = (f.askingPrice||0) - (f.cost||0) - (f.serviceCost||0) - (f.shippingCost||0);
+            const nm = f.cost>0 ? np/f.cost : 0;
+            return (
+              <div style={{ marginTop:12, paddingTop:10, borderTop:"1px solid #1e1e1e", display:"flex", gap:20, flexWrap:"wrap" }}>
+                <span style={{ fontSize:12, color:"#777" }}>Net profit: <strong style={{ ...NUM, color:np>=0?"#5de08a":"#e85d04" }}>€{np.toLocaleString("de-DE",{maximumFractionDigits:0})}</strong></span>
+                <span style={{ fontSize:12, color:"#777" }}>Margin: <strong style={{ ...NUM, color:"#c9a84c" }}>{f.cost>0?pct(nm):"—"}</strong></span>
+                <span style={{ fontSize:11, color:"#444" }}>all values stored in EUR</span>
+              </div>
+            );
+          })()}
+        </div>
+        <div style={{ marginTop:11 }}><label style={BASE_LBL}>Market Value (€)</label><input value={f.marketValue||""} onChange={e=>u("marketValue",e.target.value)} type="number" style={BASE_INP} placeholder="Your estimate in EUR"/></div>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:11, marginTop:11 }}>
           <div><label style={BASE_LBL}>Status</label><select value={f.status} onChange={e=>u("status",e.target.value)} style={BASE_INP}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select></div>
           <div><label style={BASE_LBL}>Supplier</label><select value={f.supplierId||""} onChange={e=>u("supplierId",Number(e.target.value))} style={BASE_INP}><option value="">— none —</option>{suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
@@ -529,7 +589,7 @@ function WatchModal({ data, suppliers, onClose, onSave }) {
 
         <div style={{ display:"flex", gap:10, marginTop:20, justifyContent:"flex-end" }}>
           <button onClick={onClose} style={{ background:"none", border:"1px solid #2e2e2e", borderRadius:8, padding:"8px 18px", color:"#666", fontSize:13, cursor:"pointer" }}>Cancel</button>
-          <button onClick={()=>onSave({...f,cost:Number(f.cost),askingPrice:Number(f.askingPrice),serviceCost:Number(f.serviceCost||0),marketValue:Number(f.marketValue||0),id:f.id||Date.now(),tags:typeof f.tags==="string"?f.tags.split(",").map(t=>t.trim()).filter(Boolean):f.tags})}
+          <button onClick={()=>onSave({...f,cost:Number(f.cost),askingPrice:Number(f.askingPrice),serviceCost:Number(f.serviceCost||0),shippingCost:Number(f.shippingCost||0),marketValue:Number(f.marketValue||0),id:f.id||Date.now(),tags:typeof f.tags==="string"?f.tags.split(",").map(t=>t.trim()).filter(Boolean):f.tags})}
             style={{ background:"#c9a84c", border:"none", borderRadius:8, padding:"8px 22px", color:"#0d0d0d", fontWeight:700, fontSize:13, cursor:"pointer" }}>Save</button>
         </div>
       </div>
@@ -588,18 +648,186 @@ function exportCSV(watches, suppliers) {
   URL.revokeObjectURL(url);
 }
 
+// ── LIVE CURRENCY CONVERTER ───────────────────────────────────────────────────
+function CurrencyConverter() {
+  const [rates,   setRates]   = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState("");
+  const [lastUpd, setLastUpd] = useState("");
+
+  // CZK input state
+  const [czk, setCzk] = useState("");
+  const [eur, setEur] = useState("");
+  const [vnd, setVnd] = useState("");
+
+  useEffect(() => {
+    async function fetchRates() {
+      try {
+        // Use open.er-api.com — free, no key needed
+        const res = await fetch("https://open.er-api.com/v6/latest/EUR");
+        const data = await res.json();
+        if (data.result === "success") {
+          setRates({ CZK: data.rates.CZK, VND: data.rates.VND });
+          setLastUpd(new Date().toLocaleTimeString("cs-CZ", {hour:"2-digit",minute:"2-digit"}));
+          setError("");
+        } else throw new Error("API error");
+      } catch {
+        // Fallback rates if API fails
+        setRates({ CZK: 25.2, VND: 27850 });
+        setError("Live rates unavailable — using fallback rates");
+      }
+      setLoading(false);
+    }
+    fetchRates();
+    const interval = setInterval(fetchRates, 60000); // refresh every minute
+    return () => clearInterval(interval);
+  }, []);
+
+  const VND_PER_EUR = rates?.VND || 27850;
+  const CZK_PER_EUR = rates?.CZK || 25.2;
+  const VND_PER_CZK = VND_PER_EUR / CZK_PER_EUR;
+
+  function onCzkChange(val) {
+    setCzk(val);
+    if (!val) { setEur(""); setVnd(""); return; }
+    const n = Number(val);
+    setEur((n / CZK_PER_EUR).toFixed(2));
+    setVnd(Math.round(n * VND_PER_CZK).toLocaleString("de-DE"));
+  }
+
+  function onEurChange(val) {
+    setEur(val);
+    if (!val) { setCzk(""); setVnd(""); return; }
+    const n = Number(val);
+    setCzk(Math.round(n * CZK_PER_EUR).toLocaleString("de-DE").replace(/\./g,""));
+    setVnd(Math.round(n * VND_PER_EUR).toLocaleString("de-DE"));
+  }
+
+  function onVndChange(val) {
+    const clean = val.replace(/[^\d]/g, "");
+    setVnd(clean ? Number(clean).toLocaleString("de-DE") : "");
+    if (!clean) { setCzk(""); setEur(""); return; }
+    const n = Number(clean);
+    const eurVal = n / VND_PER_EUR;
+    setEur(eurVal.toFixed(2));
+    setCzk(Math.round(eurVal * CZK_PER_EUR).toString());
+  }
+
+  const INP_STYLE = { ...BASE_INP, fontSize:20, fontFamily:"'IBM Plex Mono',monospace", fontWeight:500, padding:"14px 16px", textAlign:"right" };
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:16, maxWidth:560 }}>
+      <div>
+        <h1 style={{ fontFamily:"'Syne',sans-serif", fontSize:22, fontWeight:700, margin:"0 0 6px" }}>Currency Converter</h1>
+        <div style={{ fontSize:12, color:"#666", display:"flex", alignItems:"center", gap:10 }}>
+          <span style={{ width:7, height:7, borderRadius:"50%", background:loading?"#555":error?"#e85d04":"#5de08a", display:"inline-block" }}/>
+          {loading ? "Fetching live rates…" : error ? error : `Live rates · updated ${lastUpd}`}
+        </div>
+      </div>
+
+      {/* Rate reference */}
+      {rates && (
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
+          {[
+            ["1 EUR", `${CZK_PER_EUR.toFixed(2)} Kč`, "#c9a84c"],
+            ["1 EUR", `${Math.round(VND_PER_EUR).toLocaleString("de-DE")} ₫`, "#5de08a"],
+            ["1 Kč",  `${Math.round(VND_PER_CZK).toLocaleString("de-DE")} ₫`, "#3a7bd5"],
+          ].map(([l,v,c])=>(
+            <div key={l+v} style={{ ...CARD, padding:"14px 16px", textAlign:"center" }}>
+              <div style={{ fontSize:11, color:"#555", marginBottom:6 }}>{l} =</div>
+              <div style={{ ...NUM, fontSize:15, color:c }}>{v}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Converter inputs */}
+      <div style={{ ...CARD, display:"flex", flexDirection:"column", gap:14 }}>
+        <div style={SH_STYLE}>Convert between CZK · EUR · VND</div>
+
+        {/* CZK */}
+        <div>
+          <label style={BASE_LBL}>Czech Koruna (Kč)</label>
+          <div style={{ position:"relative" }}>
+            <input value={czk} onChange={e=>onCzkChange(e.target.value.replace(/[^\d.]/g,""))} placeholder="0" style={INP_STYLE}/>
+            <span style={{ position:"absolute", left:14, top:"50%", transform:"translateY(-50%)", fontSize:16, color:"#c9a84c", fontWeight:600, fontFamily:"'IBM Plex Mono',monospace" }}>Kč</span>
+          </div>
+        </div>
+
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <div style={{ flex:1, height:1, background:"#2e2e2e" }}/>
+          <span style={{ fontSize:12, color:"#555" }}>⇅</span>
+          <div style={{ flex:1, height:1, background:"#2e2e2e" }}/>
+        </div>
+
+        {/* EUR */}
+        <div>
+          <label style={BASE_LBL}>Euro (€)</label>
+          <div style={{ position:"relative" }}>
+            <input value={eur} onChange={e=>onEurChange(e.target.value.replace(/[^\d.]/g,""))} placeholder="0.00" style={INP_STYLE}/>
+            <span style={{ position:"absolute", left:14, top:"50%", transform:"translateY(-50%)", fontSize:16, color:"#5de08a", fontWeight:600, fontFamily:"'IBM Plex Mono',monospace" }}>€</span>
+          </div>
+        </div>
+
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <div style={{ flex:1, height:1, background:"#2e2e2e" }}/>
+          <span style={{ fontSize:12, color:"#555" }}>⇅</span>
+          <div style={{ flex:1, height:1, background:"#2e2e2e" }}/>
+        </div>
+
+        {/* VND */}
+        <div>
+          <label style={BASE_LBL}>Vietnamese Dong (₫)</label>
+          <div style={{ position:"relative" }}>
+            <input value={vnd} onChange={e=>onVndChange(e.target.value)} placeholder="0" style={INP_STYLE}/>
+            <span style={{ position:"absolute", left:14, top:"50%", transform:"translateY(-50%)", fontSize:16, color:"#3a7bd5", fontWeight:600, fontFamily:"'IBM Plex Mono',monospace" }}>₫</span>
+          </div>
+        </div>
+
+        <div style={{ fontSize:11, color:"#555", textAlign:"center", paddingTop:4 }}>
+          Type in any field — all others update instantly
+        </div>
+      </div>
+
+      {/* Quick reference table */}
+      <div style={CARD}>
+        <div style={SH_STYLE}>Quick Reference</div>
+        <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+          <thead><tr style={{ borderBottom:"1px solid #222" }}>
+            <TH>CZK</TH><TH>EUR</TH><TH>VND</TH>
+          </tr></thead>
+          <tbody>
+            {[500,1000,2000,5000,10000,20000,50000,100000].map(czk => {
+              const eurV = (czk / CZK_PER_EUR).toFixed(0);
+              const vndV = Math.round(czk * VND_PER_CZK);
+              return (
+                <tr key={czk} className="row" style={{ borderBottom:"1px solid #161616" }}>
+                  <td style={{ padding:"8px 14px",...NUM,color:"#c9a84c" }}>{czk.toLocaleString("de-DE")} Kč</td>
+                  <td style={{ padding:"8px 14px",...NUM,color:"#5de08a" }}>€{Number(eurV).toLocaleString("de-DE")}</td>
+                  <td style={{ padding:"8px 14px",...NUM,color:"#3a7bd5" }}>₫{vndV.toLocaleString("de-DE")}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ── MARKET CALCULATOR ─────────────────────────────────────────────────────────
 function MarketCalculator({ watches, sold, netProf, netMarg, fmtC, pct, currency }) {
   const [query,      setQuery]   = useState("");
   const [buyCost,    setBuy]     = useState("");
   const [svcCost,    setSvc]     = useState("");
+  const [shipCost,   setShip]    = useState("");
   const [targetPct,  setTarget]  = useState("20");
   const [loading,    setLoading] = useState(false);
   const [result,     setResult]  = useState(null);
   const [error,      setError]   = useState("");
   const [searched,   setSearched]= useState(false);
 
-  const totalCost  = (Number(buyCost)||0)+(Number(svcCost)||0);
+  const totalCost  = (Number(buyCost)||0)+(Number(svcCost)||0)+(Number(shipCost)||0);
   const targetSell = totalCost>0 ? totalCost*(1+Number(targetPct)/100) : 0;
 
   const comparables = useMemo(()=>{
@@ -617,20 +845,25 @@ function MarketCalculator({ watches, sold, netProf, netMarg, fmtC, pct, currency
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
           model:"claude-sonnet-4-20250514",
-          max_tokens:1200,
+          max_tokens:2000,
           tools:[{type:"web_search_20250305",name:"web_search"}],
-          system:`You are a vintage watch market analyst. Search for current market prices for the given watch. Look at eBay sold listings, Chrono24, WatchUSeek, Reddit r/Watchexchange, Catawiki, and vintage watch dealer websites. Return ONLY a valid JSON object, no other text, no markdown:
+          system:`You are a vintage watch market analyst with access to web search. When given a watch reference, you MUST use the web_search tool to find current real market prices. Search eBay sold listings, Chrono24, WatchUSeek forum, Reddit r/Watchexchange, Catawiki sold lots, and dealer sites. After searching, return ONLY a valid JSON object with no markdown, no explanation, nothing else:
 {"watchName":"string","priceRange":{"low":number,"high":number},"avgPrice":number,"confidence":"low|medium|high","sources":[{"name":"string","price":number,"condition":"string","url":"string","date":"string"}],"marketNotes":"string","conditionPremiums":{"Poor":-40,"Fair":-20,"Good":0,"Very Good":15,"Excellent":30,"NOS":60}}
-All prices in EUR. If insufficient data, use best estimates with low confidence.`,
-          messages:[{role:"user",content:`Search vintage watch market prices: ${query}. Find recent sold prices on eBay, Chrono24, Reddit r/Watchexchange, WatchUSeek, Catawiki. Return only the JSON object.`}]
+All prices in EUR. Use real data from search results. If you find fewer than 3 sources, set confidence to low.`,
+          messages:[{role:"user",content:`Use web search to find current market prices for this vintage watch: "${query}". Search eBay sold listings, Chrono24 listings, Reddit r/Watchexchange, WatchUSeek, and Catawiki. Find at least 3-5 real price data points. Return only the JSON object.`}]
         })
       });
       const data = await res.json();
-      const text = data.content.filter(b=>b.type==="text").map(b=>b.text).join("");
-      const match = text.match(/\{[\s\S]*\}/);
-      if(match) setResult(JSON.parse(match[0]));
-      else setError("Could not parse results. Try a more specific reference number.");
-    } catch(e) { setError("Search failed. Check connection and try again."); }
+      if(data.error) { setError(`API error: ${data.error.message}`); setLoading(false); return; }
+      const text = (data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
+      const match = text.match(/\{[\s\S]*"watchName"[\s\S]*\}/);
+      if(match) {
+        try { setResult(JSON.parse(match[0])); }
+        catch { setError("Could not parse results. Try again."); }
+      } else {
+        setError("No results found. Try a more specific search — e.g. 'Rolex Submariner 1680' or 'Seiko 62MAS J13070'");
+      }
+    } catch(e) { setError("Search failed — check your internet connection."); }
     setLoading(false);
   }
 
@@ -640,21 +873,25 @@ All prices in EUR. If insufficient data, use best estimates with low confidence.
     <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
       <div>
         <h1 style={{ fontFamily:"'Syne',sans-serif", fontSize:22, fontWeight:700, margin:"0 0 6px" }}>Market Calculator</h1>
-        <div style={{ fontSize:12, color:"#666" }}>Search live market prices across eBay, Chrono24, Reddit & dealer sites. Compare against your costs.</div>
+        <div style={{ fontSize:12, color:"#666" }}>Live web search across eBay, Chrono24, Reddit, WatchUSeek & Catawiki. Real sold prices.</div>
       </div>
 
       {/* Input */}
       <div style={CARD}>
-        <div style={SH_STYLE}>Watch + Cost</div>
-        <div style={{ display:"grid", gridTemplateColumns:"3fr 1fr 1fr 1fr", gap:12, marginBottom:14 }}>
+        <div style={SH_STYLE}>Watch + Your Costs</div>
+        <div style={{ display:"grid", gridTemplateColumns:"3fr 1fr 1fr 1fr 1fr", gap:12, marginBottom:14 }}>
           <div>
             <label style={BASE_LBL}>Reference or Model Name</label>
             <input value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>e.key==="Enter"&&search()}
-              placeholder="Seiko Dolce 8N41, Rolex 1680, Omega 105.003…" style={BASE_INP}/>
+              placeholder="Rolex 1680, Seiko 62MAS, Omega 105.003…" style={BASE_INP}/>
           </div>
           <div>
             <label style={BASE_LBL}>Buy Cost ({currency})</label>
             <input value={buyCost} onChange={e=>setBuy(e.target.value)} type="number" placeholder="0" style={BASE_INP}/>
+          </div>
+          <div>
+            <label style={BASE_LBL}>Shipping ({currency})</label>
+            <input value={shipCost} onChange={e=>setShip(e.target.value)} type="number" placeholder="0" style={BASE_INP}/>
           </div>
           <div>
             <label style={BASE_LBL}>Service ({currency})</label>
@@ -666,9 +903,13 @@ All prices in EUR. If insufficient data, use best estimates with low confidence.
           </div>
         </div>
         <button onClick={search} disabled={!query.trim()||loading}
-          style={{ background:loading||!query.trim()?"#222":"#c9a84c", border:"none", borderRadius:8, padding:"9px 22px", color:loading||!query.trim()?"#555":"#0d0d0d", fontWeight:700, fontSize:13, cursor:loading?"default":"pointer", display:"inline-flex", alignItems:"center", gap:8 }}>
-          {loading?<><span style={{ display:"inline-block",width:13,height:13,border:"2px solid #555",borderTopColor:"#c9a84c",borderRadius:"50%",animation:"spin 0.8s linear infinite" }}/>Searching markets…</>:"🔍 Search Market Prices"}
+          style={{ background:loading||!query.trim()?"#222":"#c9a84c", border:"none", borderRadius:8, padding:"10px 24px", color:loading||!query.trim()?"#555":"#0d0d0d", fontWeight:700, fontSize:13, cursor:loading?"default":"pointer", display:"inline-flex", alignItems:"center", gap:10 }}>
+          {loading ? <>
+            <span style={{ display:"inline-block",width:13,height:13,border:"2px solid #555",borderTopColor:"#c9a84c",borderRadius:"50%",animation:"spin 0.8s linear infinite" }}/>
+            Searching live markets…
+          </> : "🔍 Search Live Prices"}
         </button>
+        {loading && <div style={{ fontSize:11, color:"#555", marginTop:8 }}>Searching eBay, Chrono24, Reddit, WatchUSeek… this takes 10–20 seconds</div>}
         <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
       </div>
 
@@ -678,13 +919,13 @@ All prices in EUR. If insufficient data, use best estimates with low confidence.
           {[["Total Cost In",totalCost,"#888"],["Break Even",totalCost,"#666"],["Target Sell",targetSell,"#c9a84c"],["Target Profit",targetSell-totalCost,"#5de08a"]].map(([l,v,c])=>(
             <div key={l} style={{ ...CARD, padding:"16px 18px" }}>
               <div style={{ fontSize:10, color:"#555", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:6 }}>{l}</div>
-              <div style={{ ...NUM, fontSize:18, color:c }}>€{Number(v).toLocaleString("de-DE")}</div>
+              <div style={{ ...NUM, fontSize:18, color:c }}>{fmtC(Number(v))}</div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Your own data */}
+      {/* Your own inventory comparables */}
       {comparables.length>0 && (
         <div style={CARD}>
           <div style={SH_STYLE}>From Your Inventory ({comparables.length} matches)</div>
@@ -699,9 +940,9 @@ All prices in EUR. If insufficient data, use best estimates with low confidence.
                   <TD mono dim>{w.year}</TD>
                   <TD mono dim>{w.ref}</TD>
                   <TD dim>{w.condition}</TD>
-                  <TD mono>€{w.cost.toLocaleString("de-DE")}</TD>
-                  <td style={{ padding:"9px 12px", ...NUM, color:"#c9a84c" }}>€{w.askingPrice.toLocaleString("de-DE")}</td>
-                  <td style={{ padding:"9px 12px", ...NUM, color:netProf(w)>=0?"#5de08a":"#e85d04", fontWeight:600 }}>€{netProf(w).toLocaleString("de-DE")}</td>
+                  <TD mono>{fmtC(w.cost)}</TD>
+                  <td style={{ padding:"9px 12px", ...NUM, color:"#c9a84c" }}>{fmtC(w.askingPrice)}</td>
+                  <td style={{ padding:"9px 12px", ...NUM, color:netProf(w)>=0?"#5de08a":"#e85d04", fontWeight:600 }}>{fmtC(netProf(w))}</td>
                   <td style={{ padding:"9px 12px", ...NUM, color:netMarg(w)>=0.15?"#5de08a":netMarg(w)>=0.05?"#c9a84c":"#e85d04" }}>{pct(netMarg(w))}</td>
                   <td style={{ padding:"9px 12px" }}><Badge status={w.status}/></td>
                 </tr>
@@ -712,7 +953,7 @@ All prices in EUR. If insufficient data, use best estimates with low confidence.
       )}
 
       {/* Error */}
-      {error && <div style={{ ...CARD, borderColor:"#3a1010", background:"#1a0808", color:"#e85d04", fontSize:13 }}>{error}</div>}
+      {error && <div style={{ ...CARD, borderColor:"#3a1010", background:"#1a0808", color:"#e85d04", fontSize:13, lineHeight:1.6 }}>{error}</div>}
 
       {/* Results */}
       {result && (
@@ -721,7 +962,7 @@ All prices in EUR. If insufficient data, use best estimates with low confidence.
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14 }}>
               <div>
                 <div style={{ fontFamily:"'Syne',sans-serif", fontSize:16, fontWeight:600, marginBottom:4 }}>{result.watchName}</div>
-                <div style={{ fontSize:12, color:"#777", lineHeight:1.5 }}>{result.marketNotes}</div>
+                <div style={{ fontSize:12, color:"#777", lineHeight:1.6 }}>{result.marketNotes}</div>
               </div>
               <span style={{ fontSize:10, padding:"3px 10px", borderRadius:20, background:result.confidence==="high"?"#1a2a1a":result.confidence==="medium"?"#2a1a0e":"#222", color:result.confidence==="high"?"#5de08a":result.confidence==="medium"?"#c9a84c":"#888", flexShrink:0, marginLeft:12 }}>{result.confidence} confidence</span>
             </div>
@@ -730,14 +971,14 @@ All prices in EUR. If insufficient data, use best estimates with low confidence.
               {[["Market Low",result.priceRange?.low||0,"#888"],["Avg Price",result.avgPrice||0,"#c9a84c"],["Market High",result.priceRange?.high||0,"#5de08a"]].map(([l,v,c])=>(
                 <div key={l} style={{ background:"#121212", borderRadius:10, padding:"14px 16px", textAlign:"center" }}>
                   <div style={{ fontSize:10, color:"#555", marginBottom:6, textTransform:"uppercase", letterSpacing:"0.08em" }}>{l}</div>
-                  <div style={{ ...NUM, fontSize:20, color:c }}>€{Number(v).toLocaleString("de-DE")}</div>
+                  <div style={{ ...NUM, fontSize:20, color:c }}>{fmtC(Number(v))}</div>
                 </div>
               ))}
             </div>
 
             {totalCost>0&&result.avgPrice&&(
               <div style={{ background:"#121212", borderRadius:10, padding:"14px 16px", marginBottom:14, display:"flex", gap:24, flexWrap:"wrap" }}>
-                <span style={{ fontSize:12, color:"#777" }}>At market avg: <strong style={{ ...NUM, color:(result.avgPrice-totalCost)>=0?"#5de08a":"#e85d04" }}>€{(result.avgPrice-totalCost).toLocaleString("de-DE")} profit</strong></span>
+                <span style={{ fontSize:12, color:"#777" }}>At market avg: <strong style={{ ...NUM, color:(result.avgPrice-totalCost)>=0?"#5de08a":"#e85d04" }}>{fmtC(result.avgPrice-totalCost)} profit</strong></span>
                 <span style={{ fontSize:12, color:"#777" }}>Margin: <strong style={{ ...NUM, color:"#c9a84c" }}>{totalCost>0?pct((result.avgPrice-totalCost)/totalCost):"—"}</strong></span>
                 <span style={{ fontSize:12, color:"#777" }}>vs target: <strong style={{ color:result.avgPrice>=targetSell?"#5de08a":"#e85d04" }}>{result.avgPrice>=targetSell?"✓ target achievable":"✗ below target"}</strong></span>
               </div>
@@ -745,7 +986,7 @@ All prices in EUR. If insufficient data, use best estimates with low confidence.
 
             {result.conditionPremiums&&(
               <div>
-                <div style={{ fontSize:11, color:"#666", marginBottom:8 }}>Price by condition (from avg €{(result.avgPrice||0).toLocaleString("de-DE")}):</div>
+                <div style={{ fontSize:11, color:"#666", marginBottom:8 }}>Price by condition (from avg {fmtC(result.avgPrice||0)}):</div>
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:8 }}>
                   {CONDITIONS.map(c=>{
                     const adj=condAdj(result.avgPrice,c);
@@ -753,7 +994,7 @@ All prices in EUR. If insufficient data, use best estimates with low confidence.
                     return (
                       <div key={c} style={{ background:"#121212", borderRadius:8, padding:"10px 8px", textAlign:"center" }}>
                         <div style={{ fontSize:9, color:"#555", marginBottom:4, textTransform:"uppercase" }}>{c}</div>
-                        <div style={{ ...NUM, fontSize:13, color:"#ddd" }}>{adj?`€${adj.toLocaleString("de-DE")}`:"—"}</div>
+                        <div style={{ ...NUM, fontSize:13, color:"#ddd" }}>{adj?fmtC(adj):"—"}</div>
                         {m!==null&&<div style={{ fontSize:10, color:m>=0.15?"#5de08a":m>=0.05?"#c9a84c":"#e85d04", marginTop:3 }}>{pct(m)}</div>}
                       </div>
                     );
@@ -765,7 +1006,7 @@ All prices in EUR. If insufficient data, use best estimates with low confidence.
 
           {result.sources?.length>0&&(
             <div style={CARD}>
-              <div style={SH_STYLE}>Market Sources</div>
+              <div style={SH_STYLE}>Market Sources ({result.sources.length} found)</div>
               <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
                 {result.sources.map((s,i)=>(
                   <div key={i} style={{ display:"flex", alignItems:"center", gap:14, padding:"10px 12px", background:"#121212", borderRadius:8 }}>
@@ -773,7 +1014,7 @@ All prices in EUR. If insufficient data, use best estimates with low confidence.
                       <div style={{ fontSize:12, color:"#ccc", fontWeight:500 }}>{s.name}</div>
                       <div style={{ fontSize:11, color:"#666", marginTop:2 }}>{s.condition}{s.date?` · ${s.date}`:""}</div>
                     </div>
-                    <div style={{ ...NUM, fontSize:16, color:"#c9a84c" }}>€{Number(s.price||0).toLocaleString("de-DE")}</div>
+                    <div style={{ ...NUM, fontSize:16, color:"#c9a84c" }}>{fmtC(Number(s.price||0))}</div>
                     {s.url&&s.url.startsWith("http")&&<a href={s.url} target="_blank" rel="noreferrer" style={{ fontSize:11, color:"#3a7bd5", textDecoration:"none", padding:"3px 8px", border:"1px solid #1a2f3a", borderRadius:6 }}>View →</a>}
                   </div>
                 ))}
@@ -784,7 +1025,7 @@ All prices in EUR. If insufficient data, use best estimates with low confidence.
       )}
 
       {searched&&!loading&&!result&&!error&&(
-        <div style={{ ...CARD, color:"#555", fontSize:13, textAlign:"center", padding:"30px" }}>No results found. Try a more specific search like "Seiko 62MAS J13070" or "Rolex 1680 Submariner".</div>
+        <div style={{ ...CARD, color:"#555", fontSize:13, textAlign:"center", padding:"30px" }}>No results found. Try a more specific search — e.g. "Rolex Submariner 1680" or "Seiko 62MAS J13070".</div>
       )}
     </div>
   );
@@ -839,12 +1080,9 @@ function usePersisted(key, fallback) {
 export default function PWATrack() {
   const [watches,   setWatches]   = usePersisted("watches",   WATCHES0);
   const [suppliers, setSuppliers] = usePersisted("suppliers", SUPPLIERS0);
-  const [wishlist,  setWishlist]  = usePersisted("wishlist",  WISHLIST0);
-  const [pipeline,  setPipeline]  = usePersisted("pipeline",  PIPELINE0);
-  const [logistics, setLogistics] = usePersisted("logistics", LOGISTICS0);
   const [tab,       setTab]       = useState("Overview");
   const [role,      setRole]      = useState(null); // null | "admin" | "viewer"
-  const [currency,  setCurrency]  = useState("EUR");
+  const [currency,  setCurrency]  = useState("CZK");
   const [wm,        setWm]        = useState(null);
   const [sm,        setSm]        = useState(null);
   const [tlm,       setTlm]       = useState(null);
@@ -868,7 +1106,8 @@ export default function PWATrack() {
     return CUR.symbol + converted.toLocaleString(CUR.locale);
   }, [currency, CUR]);
 
-  const netProf = useCallback(w => profRaw(w) - (w.serviceCost||0), []);
+  const netProf = useCallback(w => profRaw(w) - (w.serviceCost||0) - (w.shippingCost||0), []);
+  const totalCosts = useCallback(w => (w.cost||0) + (w.serviceCost||0) + (w.shippingCost||0), []);
   const netMarg = useCallback(w => w.cost>0 ? netProf(w)/w.cost : 0, [netProf]);
 
   const sold   = useMemo(()=>watches.filter(w=>w.status==="sold"),   [watches]);
@@ -878,9 +1117,10 @@ export default function PWATrack() {
   const totalNetProfit   = useMemo(()=>sold.reduce((a,w)=>a+netProf(w),0),  [sold,netProf]);
   const totalRevenue     = useMemo(()=>sold.reduce((a,w)=>a+w.askingPrice,0),[sold]);
   const totalServiceCost = useMemo(()=>watches.reduce((a,w)=>a+(w.serviceCost||0),0),[watches]);
+  const totalShipping    = useMemo(()=>watches.reduce((a,w)=>a+(w.shippingCost||0),0),[watches]);
   const avgNetMargin     = useMemo(()=>sold.length?sold.reduce((a,w)=>a+netMarg(w),0)/sold.length:0,[sold,netMarg]);
   const capRisk          = useMemo(()=>active.reduce((a,w)=>a+w.cost,0),[active]);
-  const unrealisedPnl    = useMemo(()=>active.reduce((a,w)=>a+(w.marketValue||w.askingPrice)-w.cost-(w.serviceCost||0),0),[active]);
+  const unrealisedPnl    = useMemo(()=>active.reduce((a,w)=>a+(w.marketValue||w.askingPrice)-w.cost-(w.serviceCost||0)-(w.shippingCost||0),0),[active]);
   const avgHold          = useMemo(()=>{const ws=sold.filter(w=>w.bought&&w.soldDate);return ws.length?Math.round(ws.reduce((a,w)=>a+daysBetween(w.bought,w.soldDate),0)/ws.length):0;},[sold]);
   const winRate          = useMemo(()=>sold.length?sold.filter(w=>netMarg(w)>=0.1).length/sold.length:0,[sold,netMarg]);
   const bestFlip         = useMemo(()=>sold.length?sold.reduce((a,b)=>netProf(a)>netProf(b)?a:b):null,[sold,netProf]);
@@ -1118,7 +1358,7 @@ export default function PWATrack() {
             <Kpi label="Stock Value"     value={fmtC(capRisk)}          sub={`${active.length} watches`}/>
             <Kpi label="Unrealised P&L" value={fmtC(unrealisedPnl)}    sub="vs market value"            accent={unrealisedPnl>=0?"#3a7bd5":"#e85d04"}/>
             <Kpi label="Service Spend"  value={fmtC(totalServiceCost)} sub="Total all watches"/>
-            <Kpi label="Pipeline"       value={pipeline.length+""}      sub="Deals tracked"              accent="#9333ea"/>
+          
           </div>
 
           <div className="two-col" style={{ display:"grid", gridTemplateColumns:"2fr 1fr", gap:14, marginBottom:14 }}>
@@ -1254,7 +1494,7 @@ export default function PWATrack() {
                     {isAdmin && <th style={{ padding:"10px 14px", width:36 }}>
                       <input type="checkbox" checked={selected.size===sortedFiltered.length&&sortedFiltered.length>0} onChange={()=>toggleSelectAll(sortedFiltered.map(w=>w.id))} style={{ cursor:"pointer" }}/>
                     </th>}
-                    {[["year","Year"],["brand","Brand"],["","Model"],["","Ref"],["condition","Cond."],["cost","Cost"],["askingPrice","Ask"],["","Service"],["netProfit","Net Profit"],["margin","Margin"],["days","Days"],["","Mkt Val."],["status","Status"],["",""],["",""]].map(([col,label],i)=>(
+                    {[["year","Year"],["brand","Brand"],["","Model"],["","Ref"],["condition","Cond."],["cost","Cost"],["askingPrice","Ask"],["","Ship."],["","Service"],["netProfit","Net Profit"],["margin","Margin"],["days","Days"],["","Mkt Val."],["status","Status"],["",""],["",""],["",""]].map(([col,label],i)=>(
                       <th key={i} onClick={()=>col&&setSort(col)}
                         style={{ padding:"10px 14px", textAlign:"left", color: col&&sortCol===col?"#c9a84c":"#555", fontWeight:500, fontSize:10, textTransform:"uppercase", letterSpacing:"0.08em", cursor:col?"pointer":"default", userSelect:"none", whiteSpace:"nowrap" }}>
                         {label} {col&&<SortIcon col={col}/>}
@@ -1285,6 +1525,7 @@ export default function PWATrack() {
                         <TD dim>{w.condition}</TD>
                         <TD mono>{fmtC(w.cost)}</TD>
                         <TD mono>{fmtC(w.askingPrice)}</TD>
+                        <td style={{ padding:"10px 14px",...NUM,fontSize:11,color:w.shippingCost?"#3a7bd5":"#444" }}>{w.shippingCost?fmtC(w.shippingCost):"—"}</td>
                         <td style={{ padding:"10px 14px",...NUM,fontSize:11,color:w.serviceCost?"#9333ea":"#444" }}>{w.serviceCost?fmtC(w.serviceCost):"—"}</td>
                         <td style={{ padding:"10px 14px",...NUM,color:np>=0?"#5de08a":"#e85d04",fontWeight:600 }}>{fmtC(np)}</td>
                         <td style={{ padding:"10px 14px",...NUM,color:nm>=0.15?"#5de08a":nm>=0.05?"#c9a84c":"#e85d04" }}>{pct(nm)}</td>
@@ -1303,79 +1544,6 @@ export default function PWATrack() {
           </div>
         </>}
 
-        {/* ── LOGISTICS ──────────────────────────────────────────────────────── */}
-        {tab==="Logistics" && <>
-          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:18 }}>
-            <h1 style={{ ...H1, margin:0, flex:1 }}>Logistics</h1>
-            <button onClick={()=>setLogistics(l=>[...l,{id:Date.now(),watchId:"",brand:"",model:"",carrier:"",trackingNo:"",from:"",to:"",status:"preparing",sent:"",eta:"",arrived:"",cost:0,insured:false,insuredValue:0,notes:""}])}
-              style={{ background:"#c9a84c", border:"none", borderRadius:8, padding:"7px 18px", color:"#0d0d0d", fontWeight:700, fontSize:12, cursor:"pointer" }}>+ Add Shipment</button>
-          </div>
-          <div className="kpi-grid-4" style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:18 }}>
-            <Kpi label="Total Shipments" value={logistics.length}/>
-            <Kpi label="In Transit"      value={logistics.filter(l=>l.status==="in transit").length} accent="#c9a84c"/>
-            <Kpi label="Delivered"       value={logistics.filter(l=>l.status==="delivered").length}  accent="#5de08a"/>
-            <Kpi label="Shipping Spend"  value={fmtC(logistics.reduce((a,l)=>a+(l.cost||0),0))}     accent="#9333ea"/>
-          </div>
-          {logistics.filter(l=>l.status!=="delivered").length>0&&<>
-            <div style={{ fontSize:10, color:"#555", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:10 }}>In Transit</div>
-            <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:20 }}>
-              {logistics.filter(l=>l.status!=="delivered").map(s=>(
-                <div key={s.id} style={{ ...CARD, padding:"16px 20px", display:"flex", gap:16, alignItems:"center", flexWrap:"wrap" }}>
-                  <div style={{ flex:1, minWidth:200 }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:5, flexWrap:"wrap" }}>
-                      <span style={{ fontFamily:"'Syne',sans-serif", fontSize:14, fontWeight:600 }}>{s.brand} {s.model}</span>
-                      <Badge status={s.status}/>
-                      {s.insured&&<span style={{ fontSize:10, padding:"2px 8px", borderRadius:20, background:"#1a2a1a", color:"#5de08a" }}>insured</span>}
-                    </div>
-                    <div style={{ display:"flex", gap:16, fontSize:11, color:"#666", flexWrap:"wrap" }}>
-                      <span>📦 {s.carrier||"—"}</span><span>📍 {s.from||"—"} → {s.to||"—"}</span>
-                      {s.eta&&<span>🕐 ETA: {s.eta}</span>}
-                    </div>
-                    {s.trackingNo&&<div style={{ ...NUM, fontSize:11, color:"#666", marginTop:5 }}>{s.trackingNo}</div>}
-                  </div>
-                  <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
-                    <div style={{ textAlign:"right" }}>
-                      <div style={{ fontSize:10, color:"#555", marginBottom:2 }}>Cost</div>
-                      <div style={{ ...NUM, fontSize:13, color:"#aaa" }}>{fmtC(s.cost||0)}</div>
-                    </div>
-                    {["preparing","in transit","delivered"].map(st=>(
-                      <button key={st} onClick={()=>setLogistics(ls=>ls.map(x=>x.id===s.id?{...x,status:st,arrived:st==="delivered"?new Date().toISOString().slice(0,10):x.arrived}:x))}
-                        className="pill" style={{ background:s.status===st?"#c9a84c":"#181818", color:s.status===st?"#0d0d0d":"#666", fontWeight:s.status===st?700:400, fontSize:10, padding:"4px 8px" }}>
-                        {st}
-                      </button>
-                    ))}
-                    <button onClick={()=>{ if(window.confirm('Delete this shipment?')) setLogistics(ls=>ls.filter(x=>x.id!==s.id)); }} className="ghost" style={{ color:"#e85d04", borderColor:"#3a1a1a" }}>×</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>}
-          <div style={{ fontSize:10, color:"#555", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:10 }}>All Shipments</div>
-          <div style={{ ...CARD, padding:0, overflow:"hidden" }}>
-            <div style={{ overflowX:"auto" }}>
-              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
-                <thead><tr style={{ borderBottom:"1px solid #222" }}>
-                  {["Watch","Carrier","Tracking","Route","Sent","ETA / Arrived","Cost","Insured","Status"].map(h=><TH key={h}>{h}</TH>)}
-                </tr></thead>
-                <tbody>
-                  {[...logistics].sort((a,b)=>new Date(b.sent||0)-new Date(a.sent||0)).map(s=>(
-                    <tr key={s.id} className="row" style={{ borderBottom:"1px solid #161616" }}>
-                      <td style={{ padding:"10px 14px", color:"#ccc" }}>{s.brand} {s.model}</td>
-                      <TD dim>{s.carrier||"—"}</TD>
-                      <td style={{ padding:"10px 14px",...NUM,fontSize:11,color:"#666" }}>{s.trackingNo||"—"}</td>
-                      <td style={{ padding:"10px 14px",fontSize:11,color:"#777" }}>{s.from&&s.to?`${s.from} → ${s.to}`:"—"}</td>
-                      <TD mono dim>{s.sent||"—"}</TD>
-                      <TD mono dim>{s.arrived||s.eta||"—"}</TD>
-                      <TD mono>{s.cost?fmtC(s.cost):"—"}</TD>
-                      <td style={{ padding:"10px 14px",fontSize:11,color:s.insured?"#5de08a":"#555" }}>{s.insured?fmtC(s.insuredValue):"No"}</td>
-                      <td style={{ padding:"10px 14px" }}><Badge status={s.status}/></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>}
 
         {/* ── P&L ───────────────────────────────────────────────────────────── */}
         {tab==="P&L" && <>
@@ -1690,93 +1858,6 @@ export default function PWATrack() {
           </div>
         </>}
 
-        {/* ── WISHLIST ───────────────────────────────────────────────────────── */}
-        {tab==="Wishlist" && <>
-          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:18 }}>
-            <h1 style={{ ...H1, margin:0, flex:1 }}>Wishlist</h1>
-            <button onClick={()=>setWishlist(w=>[...w,{id:Date.now(),brand:"",model:"",ref:"",year:"",targetBuy:0,marketEst:0,priority:"medium",notes:"",found:false}])}
-              style={{ background:"#c9a84c", border:"none", borderRadius:8, padding:"7px 18px", color:"#0d0d0d", fontWeight:700, fontSize:12, cursor:"pointer" }}>+ Add</button>
-          </div>
-          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-            {wishlist.map(item=>(
-              <div key={item.id} style={{ ...CARD, padding:"16px 20px", display:"flex", gap:16, alignItems:"center", flexWrap:"wrap", opacity:item.found?0.5:1 }}>
-                <div style={{ flex:1, minWidth:200 }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:3, flexWrap:"wrap" }}>
-                    <span style={{ fontFamily:"'Syne',sans-serif", fontSize:14, fontWeight:600, color:item.found?"#666":"#f0ebe0" }}>{item.brand||"—"} {item.model||"—"}</span>
-                    <span style={{ fontSize:10,padding:"2px 8px",borderRadius:20,background:item.priority==="high"?"#2a1a0e":item.priority==="medium"?"#222":"#1a2a1a",color:item.priority==="high"?"#c9a84c":item.priority==="medium"?"#888":"#5de08a" }}>{item.priority}</span>
-                    {item.found&&<span style={{ fontSize:10,padding:"2px 8px",borderRadius:20,background:"#1a2f3a",color:"#3a7bd5" }}>found</span>}
-                  </div>
-                  <div style={{ fontSize:11, color:"#555" }}>{item.year} · {item.ref} · {item.notes}</div>
-                </div>
-                <div style={{ display:"flex", gap:18, alignItems:"center", flexWrap:"wrap" }}>
-                  {[["Target Buy",item.targetBuy,"#c9a84c"],["Market Est.",item.marketEst,"#888"],["Upside",item.marketEst&&item.targetBuy?item.marketEst-item.targetBuy:null,(item.marketEst-item.targetBuy)>0?"#5de08a":"#e85d04"]].map(([l,v,c])=>(
-                    <div key={l} style={{ textAlign:"right" }}>
-                      <div style={{ fontSize:10,color:"#444",marginBottom:2 }}>{l}</div>
-                      <div style={{ ...NUM,fontSize:15,color:v?c:"#444" }}>{v?fmtC(v):"—"}</div>
-                    </div>
-                  ))}
-                  <button onClick={()=>setWishlist(w=>w.map(x=>x.id===item.id?{...x,found:!x.found}:x))} className="ghost">{item.found?"Unmark":"Mark Found"}</button>
-                  <button onClick={()=>{ if(window.confirm('Remove from wishlist?')) setWishlist(w=>w.filter(x=>x.id!==item.id)); }} className="ghost" style={{ color:"#e85d04",borderColor:"#3a1a1a" }}>×</button>
-                </div>
-              </div>
-            ))}
-            {!wishlist.length&&<div style={{ color:"#444",fontSize:13,textAlign:"center",padding:"40px 0" }}>No watches on wishlist yet</div>}
-          </div>
-        </>}
-
-        {/* ── PIPELINE ───────────────────────────────────────────────────────── */}
-        {tab==="Pipeline" && <>
-          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:18 }}>
-            <h1 style={{ ...H1, margin:0, flex:1 }}>Deal Pipeline</h1>
-            <button onClick={()=>setPipeline(p=>[...p,{id:Date.now(),brand:"",model:"",ref:"",year:"",askingPrice:0,offerMade:0,status:"interested",supplierId:"",notes:"",lastContact:""}])}
-              style={{ background:"#c9a84c", border:"none", borderRadius:8, padding:"7px 18px", color:"#0d0d0d", fontWeight:700, fontSize:12, cursor:"pointer" }}>+ Add Deal</button>
-          </div>
-          <div className="three-col" style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, marginBottom:18 }}>
-            {[["tracking","Tracking","#666"],["interested","Interested","#3a7bd5"],["negotiating","Negotiating","#c9a84c"]].map(([s,l,c])=>(
-              <div key={s} style={{ ...CARD, textAlign:"center" }}>
-                <div style={{ fontSize:10,color:"#555",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:6 }}>{l}</div>
-                <div style={{ ...NUM,fontSize:28,color:c }}>{pipeline.filter(p=>p.status===s).length}</div>
-              </div>
-            ))}
-          </div>
-          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-            {pipeline.map(item=>{
-              const gap=item.askingPrice&&item.offerMade?item.askingPrice-item.offerMade:null;
-              const sup=suppliers.find(s=>s.id===item.supplierId);
-              return (
-                <div key={item.id} style={{ ...CARD, padding:"16px 20px", display:"flex", gap:16, alignItems:"center", flexWrap:"wrap" }}>
-                  <div style={{ flex:1, minWidth:200 }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4, flexWrap:"wrap" }}>
-                      <span style={{ fontFamily:"'Syne',sans-serif", fontSize:14, fontWeight:600 }}>{item.brand||"—"} {item.model||"—"}</span>
-                      <Badge status={item.status}/>
-                    </div>
-                    <div style={{ fontSize:11, color:"#555" }}>{item.year} · {item.ref}{sup?` · ${sup.name}`:""}</div>
-                    <div style={{ fontSize:11, color:"#666", marginTop:4 }}>{item.notes}</div>
-                    {item.lastContact&&<div style={{ fontSize:10, color:"#444", marginTop:4 }}>Last contact: {item.lastContact}</div>}
-                  </div>
-                  <div style={{ display:"flex", gap:14, alignItems:"center", flexWrap:"wrap" }}>
-                    {[["Asking",item.askingPrice,"#888"],["Offer",item.offerMade,"#c9a84c"],["Gap",gap,gap>0?"#e85d04":"#5de08a"]].map(([l,v,c])=>(
-                      <div key={l} style={{ textAlign:"right" }}>
-                        <div style={{ fontSize:10,color:"#444",marginBottom:2 }}>{l}</div>
-                        <div style={{ ...NUM,fontSize:14,color:v?c:"#444" }}>{v?fmtC(v):"—"}</div>
-                      </div>
-                    ))}
-                    <div style={{ display:"flex", gap:5 }}>
-                      {["tracking","interested","negotiating"].map(s=>(
-                        <button key={s} onClick={()=>setPipeline(p=>p.map(x=>x.id===item.id?{...x,status:s}:x))}
-                          className="pill" style={{ background:item.status===s?"#c9a84c":"#181818", color:item.status===s?"#0d0d0d":"#666", fontWeight:item.status===s?700:400, fontSize:10, padding:"4px 8px" }}>
-                          {s}
-                        </button>
-                      ))}
-                      <button onClick={()=>{ if(window.confirm('Remove from pipeline?')) setPipeline(p=>p.filter(x=>x.id!==item.id)); }} className="ghost" style={{ color:"#e85d04",borderColor:"#3a1a1a" }}>×</button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-            {!pipeline.length&&<div style={{ color:"#444",fontSize:13,textAlign:"center",padding:"40px 0" }}>No deals in pipeline</div>}
-          </div>
-        </>}
 
         {/* ── CALCULATOR ─────────────────────────────────────────────────────── */}
         {tab==="Calculator" && <MarketCalculator watches={watches} sold={sold} netProf={netProf} netMarg={netMarg} fmtC={fmtC} pct={pct} currency={CUR.symbol}/>}
